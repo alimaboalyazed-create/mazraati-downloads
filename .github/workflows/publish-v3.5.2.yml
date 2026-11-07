@@ -1,0 +1,49 @@
+name: Publish approved Mazraati v3.5.2 signed APK
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v3.5.2.yml'
+permissions:
+  contents: write
+concurrency:
+  group: mazraati-public-v3.5.2
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - name: Prevent release asset replacement
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v3.5.2 -R "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "::error::v3.5.2 exists, refusing to overwrite."; exit 1
+          fi
+      - name: Download and verify approved signed APK
+        env:
+          SOURCE_URL: "https://sdmntprcentralus.oaiusercontent.com/files/00000000-57ec-81f5-a057-5c701966d2fd/raw?se=2026-11-07T16%3A15%3A07Z&sp=r&sv=2026-02-06&sr=b&scid=5b2685ad-ad71-556c-a01f-2a8bb860d24c&skoid=d1cabc79-3240-4866-94fe-6005330cb49e&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-11-07T13%3A04%3A24Z&ske=2026-11-08T13%3A04%3A24Z&sks=b&skv=2026-02-06&sig=9lofBQzADpefjLQLNRi4GkPN4ZvguI%2BK/qGW5DaRKqo%3D"
+          EXPECTED_SHA256: "60f4a312449db9091f1cb3feb808d1f8aaa92025c995dddd797b4ad54d720bda"
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error --retry 4 --retry-delay 3 --max-time 120 \
+            "$SOURCE_URL" -o "$RUNNER_TEMP/signed.zip"
+          mkdir -p "$RUNNER_TEMP/approved"
+          unzip -j "$RUNNER_TEMP/signed.zip" mazraati-3.5.2.apk -d "$RUNNER_TEMP/approved"
+          cd "$RUNNER_TEMP/approved"
+          echo "$EXPECTED_SHA256  mazraati-3.5.2.apk" | sha256sum --check
+          test "$(wc -c < mazraati-3.5.2.apk)" -eq 4315508
+          echo "Exact verified signed APK ready."
+      - name: Publish public release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create v3.5.2 "$RUNNER_TEMP/approved/mazraati-3.5.2.apk" \
+            -R "${{ github.repository }}" \
+            --title "مزرعتي 3.5.2 — تحديث المصروفات والمواليد" \
+            --notes "تحديث مزرعتي الرسمي 3.5.2 (versionCode 11): تجميع إجمالي المصروفات أعلى الحسابات، وتصنيف كل نوع تحت حساب مستقل بإجماليه وتفاصيل عملياته، بما في ذلك مشتريات الأعلاف والحيوانات دون ازدواج حساب. إضافة أمهات الماعز والغنم لقسم الولادات والمواليد، وتسجيل المولود تلقائيًا من نفس نوع الأم. التطبيق يحافظ على نفس هوية الحزمة وشهادة التوقيع والبيانات القائمة. الحسابات السحابية المستقلة وحل تعارض المزامنة بين أجهزة متعددة دون اتصال غير متاحين بهذا الإصدار."
+          curl --fail --location --silent --show-error --head --retry 5 --retry-delay 3 \
+            "https://github.com/${{ github.repository }}/releases/download/v3.5.2/mazraati-3.5.2.apk" >/dev/null
+          echo "Public APK link available and verified."
