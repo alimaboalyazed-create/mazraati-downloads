@@ -1,0 +1,50 @@
+name: Publish Mazraati v3.5.0 signed release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v3.5.0.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Reject duplicate releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v3.5.0 -R "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Already published v3.5.0; refusing to replace existing release."
+            exit 1
+          fi
+      - name: Download and verify the approved signed APK
+        env:
+          SIGNED_SOURCE_URL: "https://sdmntpritalynorth.oaiusercontent.com/files/00000000-3560-8246-9b06-79e67b136820/raw?se=2026-11-07T08%3A01%3A59Z&sp=r&sv=2026-02-06&sr=b&scid=3991d972-0a2d-5a31-9eb8-98f45805b36e&skoid=82a3371f-2f6c-4f81-8a78-2701b362559b&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-11-06T22%3A53%3A05Z&ske=2026-11-07T22%3A53%3A05Z&sks=b&skv=2026-02-06&sig=Fa9nN0J32vl2d7NxWEUiAa0RBJFUW6z1DoGZSIwHovk%3D"
+          EXPECTED_SHA256: "d8c0921ff30e3aad2685392504a9bc72a248ea1a3869c0004569c399257f4426"
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 3 --max-time 150 \
+             "$SIGNED_SOURCE_URL" -o "$RUNNER_TEMP/mazraati-signed.zip"
+          mkdir -p "$RUNNER_TEMP/approved"
+          unzip -j "$RUNNER_TEMP/mazraati-signed.zip" "mazraati-3.5.0.apk" -d "$RUNNER_TEMP/approved"
+          cd "$RUNNER_TEMP/approved"
+          echo "$EXPECTED_SHA256  mazraati-3.5.0.apk" | sha256sum --check
+          test "$(wc -c < mazraati-3.5.0.apk)" -eq 4312061
+      - name: Create official release and attach APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "v3.5.0" "$RUNNER_TEMP/approved/mazraati-3.5.0.apk" \
+            -R "${{ github.repository }}" \
+            --title "مزرعتي 3.5.0 — التحديث المعتمد" \
+            --notes "تحديث معتمد من مالك تطبيق مزرعتي. التناسل والعشار والولادات والمواليد، متابعة المحاصيل والأراضي، حصص العلف حسب الوزن، تحليل التكاليف والربحية، التنبيهات اليومية، الملف العلاجي، رموز QR لكل حيوان، توقعات النمو، تقارير وفواتير PDF. تبقى بيانات المزرعة الحالية مرتبطة بنظام Firebase الموجود. المزارع السحابية المستقلة والمزامنة بين أجهزة متعددة دون إنترنت لم تُفعّلا في هذا الإصدار."
+          curl --fail --location --silent --show-error --head --retry 5 --retry-delay 3 --max-time 60 \
+             "https://github.com/${{ github.repository }}/releases/download/v3.5.0/mazraati-3.5.0.apk" >/dev/null
+          echo "Published v3.5.0 and verified public APK link."
