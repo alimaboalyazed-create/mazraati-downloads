@@ -1,0 +1,48 @@
+name: Publish approved Mazraati 3.5.5 APK
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'release-staging/v3.5.5.txt'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: mazraati-v3-5-5-public-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch approved, signed APK from short-lived transport
+        env:
+          STAGING_FILE: release-staging/v3.5.5.txt
+        run: |
+          set -euo pipefail
+          test -s "$STAGING_FILE"
+          readarray -t lines < "$STAGING_FILE"
+          test "${#lines[@]}" -eq 2
+          URL="${lines[0]}"
+          EXPECTED_APK_SHA="${lines[1]}"
+          [[ "$URL" == https://sdmntprcentralus.oaiusercontent.com/files/* ]] || { echo "Unexpected artifact transport"; exit 1; }
+          [[ "$EXPECTED_APK_SHA" =~ ^[a-f0-9]{64}$ ]] || { echo "Invalid SHA256"; exit 1; }
+          curl --fail --silent --show-error --location --retry 4 --retry-delay 3 --connect-timeout 20 --max-time 180 "$URL" -o /tmp/mazraati-official.zip
+          unzip -p /tmp/mazraati-official.zip mazraati-3.5.5.apk > mazraati-3.5.5.apk
+          echo "$EXPECTED_APK_SHA  mazraati-3.5.5.apk" | sha256sum --check --status
+          test "$(stat -c%s mazraati-3.5.5.apk)" -gt 3000000
+          echo 'Validated official APK file and approved SHA256'
+      - name: Publish the verified APK to public GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v3.5.5 >/dev/null 2>&1; then
+            echo "::error::v3.5.5 already exists; refusing to replace."
+            exit 1
+          fi
+          gh release create v3.5.5 ./mazraati-3.5.5.apk \
+            --title "مزرعتي — التحديث الرسمي 3.5.5" \
+            --notes "تحديث الحاسبة: كتابة اسم خامة العلف وكميتها بالكيلو، ثم حساب البروتين والطاقة والألياف تلقائيًا حسب القيم المتاحة للمادة. حفظ التحاليل الخاصة بالخامات الجديدة، وحساب تكاليف الخلطة مع الأسعار المسجلة. يحافظ التحديث على باقي وظائف مزرعتي وبياناتها."
+          test "$(gh release view v3.5.5 --json assets --jq '.assets | length')" -eq 1
