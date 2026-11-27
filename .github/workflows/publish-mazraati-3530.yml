@@ -1,0 +1,41 @@
+name: Publish verified Mazraati 3.5.30 APK
+on:
+  push:
+    branches: [release/public-3-5-30]
+    paths: ['.github/workflows/publish-mazraati-3530.yml']
+permissions:
+  contents: write
+  statuses: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and publish exact signed APK
+        run: |
+          set -euo pipefail
+          apk=mazraati-3.5.30.apk
+          release_page=https://github.com/$GITHUB_REPOSITORY/releases/tag/v3.5.30
+          url=https://github.com/$GITHUB_REPOSITORY/releases/download/v3.5.30/$apk
+          status() {
+            gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$1" -f context='mazraati/3.5.30-public-apk' -f description="$2" -f target_url="$3" >/dev/null
+          }
+          trap 'status failure "Public APK publication failed" "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" || true' ERR
+          status pending "Publishing signed APK" "$release_page"
+          cat apk-parts/part-* > "$apk"
+          test "$(stat -c%s "$apk")" -eq 4423694
+          echo "a5708fc1fc7e6bb4a9bcac41827ef990f99feaff8b4b7db25ee04a175c2656b5  $apk" | sha256sum -c
+          unzip -p "$apk" assets/farm-barn-ledger-import.js > /tmp/verified-import.js
+          grep -Fq 'ledgerCardPlan' /tmp/verified-import.js
+          grep -Fq 'ledgerWeightPlan' /tmp/verified-import.js
+          if gh release view v3.5.30 >/dev/null 2>&1; then
+            echo "Release already exists; refusing overwrite"
+            exit 1
+          fi
+          gh release create v3.5.30 "$apk" --target "$GITHUB_SHA" --latest --title "مزرعتي — التحديث الرسمي 3.5.30" --notes "استيراد كارتة الصنف والأوزان من Excel مع معاينة وربط الأعمدة وحماية السجلات القديمة ومنع التكرار. النسخة موقعة بنفس شهادة التطبيق الأصلية."
+          curl --fail --silent --show-error --location --retry 5 --retry-delay 3 --max-time 120 "$url" -o /tmp/public.apk
+          echo "a5708fc1fc7e6bb4a9bcac41827ef990f99feaff8b4b7db25ee04a175c2656b5  /tmp/public.apk" | sha256sum -c
+          status success "Public signed APK downloaded and SHA256 verified" "$url"
