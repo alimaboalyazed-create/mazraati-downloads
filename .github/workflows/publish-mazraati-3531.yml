@@ -1,0 +1,43 @@
+name: Publish verified Mazraati 3.5.31 APK
+on:
+  push:
+    branches: [release/public-3-5-31]
+    paths: ['.github/workflows/publish-mazraati-3531.yml']
+permissions:
+  contents: write
+  statuses: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and publish exact signed APK
+        run: |
+          set -euo pipefail
+          apk=mazraati-3.5.31.apk
+          release_page=https://github.com/$GITHUB_REPOSITORY/releases/tag/v3.5.31
+          url=https://github.com/$GITHUB_REPOSITORY/releases/download/v3.5.31/$apk
+          status() {
+            gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state="$1" -f context='mazraati/3.5.31-public-apk' -f description="$2" -f target_url="$3" >/dev/null
+          }
+          trap 'status failure "Public APK publication failed" "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" || true' ERR
+          status pending "Publishing signed APK" "$release_page"
+          cat apk-parts/part-* > "$apk"
+          test "$(stat -c%s "$apk")" -eq 4424570
+          echo "fa7b45768718e93f937dcd17446b8a4386b010bbd5759f6314a3c3f17494574d  $apk" | sha256sum -c
+          unzip -p "$apk" assets/farm-barn-ledger-import.js > /tmp/verified-import.js
+          grep -Fq 'unassigned' /tmp/verified-import.js
+          grep -Fq 'blankFeedStatement' /tmp/verified-import.js
+          grep -Fq 'p.warning' /tmp/verified-import.js
+          grep -Fq 'ledgerWeightPlan' /tmp/verified-import.js
+          if gh release view v3.5.31 >/dev/null 2>&1; then
+            echo "Release already exists; refusing overwrite"
+            exit 1
+          fi
+          gh release create v3.5.31 "$apk" --target "$GITHUB_SHA" --latest --title "مزرعتي — التحديث الرسمي 3.5.31" --notes "استيراد صفوف كارتة الصنف من Excel حتى لو كان نوع العلف فارغًا، مع الحفاظ على الكميات والخانات الفارغة. تنبيه عند وجود رصيد سالب دون تغيير البيانات. النسخة موقعة بنفس شهادة التطبيق الأصلية."
+          curl --fail --silent --show-error --location --retry 5 --retry-delay 3 --max-time 120 "$url" -o /tmp/public.apk
+          echo "fa7b45768718e93f937dcd17446b8a4386b010bbd5759f6314a3c3f17494574d  /tmp/public.apk" | sha256sum -c
+          status success "Public signed APK downloaded and SHA256 verified" "$url"
